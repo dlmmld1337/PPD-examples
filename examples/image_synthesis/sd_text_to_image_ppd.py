@@ -187,6 +187,17 @@ def parse_args():
         default=512,
         help="Width of the image"
     )
+    parser.add_argument(
+        "--partial_denoising",
+        action="store_true",
+        help="Use partial denoising (only denoise the structured noise)"
+    )
+    parser.add_argument(
+        "--partial_denoising_strength",
+        type=float,
+        default=0.5,
+        help="Strength of the partial denoising"
+    )
     return parser.parse_args()
 
 
@@ -248,6 +259,8 @@ if __name__ == "__main__":
             height=height, width=width, num_inference_steps=inference_steps,
             noise=structured_noise,
             return_latents=args.save_intermediates,
+            input_image=image_in_pil if not args.partial_denoising else None,
+            denoising_strength=args.partial_denoising_strength if args.partial_denoising else 1.0,
         )
         if args.save_intermediates:
             reference_image, list_latents = reference_image
