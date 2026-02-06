@@ -46,6 +46,10 @@ PYTHONPATH=. bash examples/flux/model_training/lora/PPD-FLUX.1-dev.sh
 ```
 By default it uses [this dataset](https://huggingface.co/datasets/bghira/photo-concept-bucket) for training
 
+WAN example: use the training scripts in `examples/wanvideo'
+
+By default video training uses [this dataset](https://huggingface.co/datasets/zengxianyu/open-sora-pexels-subset)
+
 This repo is largely borrowed from https://github.com/modelscope/DiffSynth-Studio. Please refer to the original repo for more training script and more use cases. 
 
 If you find this work useful, please cite:
