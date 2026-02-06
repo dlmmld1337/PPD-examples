@@ -1,4 +1,6 @@
 import torch, os, json
+import numpy as np
+from structured_noise import generate_structured_noise_batch_vectorized
 from diffsynth import load_state_dict
 from diffsynth.pipelines.wan_video_new import WanVideoPipeline, ModelConfig
 from diffsynth.trainers.utils import DiffusionTrainingModule, ModelLogger, launch_training_task, wan_parser
@@ -86,6 +88,12 @@ class WanTrainingModule(DiffusionTrainingModule):
     
     def forward(self, data, inputs=None):
         if inputs is None: inputs = self.forward_preprocess(data)
+        input_latents = inputs["input_latents"]
+        cutoff_radius = np.random.exponential(scale=1/0.1)
+        input_noise = torch.randn_like(input_latents[0].transpose(0,1).float())
+        structured_noise = generate_structured_noise_batch_vectorized(input_latents[0].transpose(0,1), cutoff_radius=cutoff_radius, input_noise=input_noise)
+        structured_noise = structured_noise.transpose(0,1)[None].contiguous()
+        inputs["noise"] = structured_noise.to(dtype=self.pipe.torch_dtype, device=self.pipe.device)
         models = {name: getattr(self.pipe, name) for name in self.pipe.in_iteration_models}
         loss = self.pipe.training_loss(**models, **inputs)
         return loss
