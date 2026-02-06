@@ -1,6 +1,6 @@
 <div align="center">
 
-# NeuralRemaster: Phase-Preserving Diffusion
+# Phase-Preserving Diffusion
 
 **Structure-Aligned Generation for Games, Videos, and Simulators**
 
