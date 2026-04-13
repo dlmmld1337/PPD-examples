@@ -1,0 +1,1 @@
+stdbuf -oL -eL bash PPD-SD1.5-Filter-Full.sh > full_train.log 2>&1 &

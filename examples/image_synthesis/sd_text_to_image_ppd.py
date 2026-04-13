@@ -7,6 +7,27 @@ from diffsynth.models.utils import load_state_dict
 import argparse
 
 
+def _normalize_unet_state_dict(state_dict):
+    normalized_state_dict = {}
+    prefixes = (
+        "pipe.denoising_model.",
+        "pipe.unet.",
+        "denoising_model.",
+        "unet.",
+        "model.",
+    )
+    for key, value in state_dict.items():
+        if not torch.is_tensor(value):
+            continue
+        normalized_key = key
+        for prefix in prefixes:
+            if normalized_key.startswith(prefix):
+                normalized_key = normalized_key[len(prefix):]
+                break
+        normalized_state_dict[normalized_key] = value
+    return normalized_state_dict
+
+
 def load_trained_model_from_checkpoint(checkpoint_path, pipe, use_ema=True, strict_loading=True):
     if checkpoint_path is None:
         print("No checkpoint path provided, only loading base model")
@@ -15,20 +36,26 @@ def load_trained_model_from_checkpoint(checkpoint_path, pipe, use_ema=True, stri
     # Load the checkpoint
     print(f"Loading checkpoint from: {checkpoint_path}")
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    if not isinstance(checkpoint, dict):
+        raise ValueError(f"Unsupported checkpoint format in {checkpoint_path}")
     
     # Load weights based on use_ema parameter
     if use_ema and 'ema_state_dict' in checkpoint:
         print("Loading EMA weights from checkpoint...")
-        trained_state_dict = checkpoint['ema_state_dict']
+        trained_state_dict = _normalize_unet_state_dict(checkpoint['ema_state_dict'])
         print(f"Found {len(trained_state_dict)} EMA parameters in checkpoint")
-    elif use_ema and 'ema_state_dict' not in checkpoint:
-        raise ValueError("EMA weights requested but not found in checkpoint")
     else:
+        if use_ema and 'ema_state_dict' not in checkpoint:
+            print("EMA weights not found in checkpoint, falling back to regular weights.")
+        if 'state_dict' in checkpoint and isinstance(checkpoint['state_dict'], dict):
+            trained_state_dict = _normalize_unet_state_dict(checkpoint['state_dict'])
+        else:
+            trained_state_dict = _normalize_unet_state_dict(checkpoint)
         print("Loading regular trained parameters from checkpoint...")
         print(f"Found {len(trained_state_dict)} regular parameters in checkpoint")
     
     # Load the trained parameters into the UNet
-    unet = pipe.unet
+    unet = pipe.unet if getattr(pipe, "unet", None) is not None else pipe.denoising_model()
     if unet is not None:
         # Validate that we have the right checkpoint for this model
         unet_state_dict = unet.state_dict()
@@ -198,11 +225,25 @@ def parse_args():
         default=0.5,
         help="Strength of the partial denoising"
     )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="cuda",
+        help="Execution device for model loading and inference. Use 'cpu' for smoke tests.",
+    )
+    parser.add_argument(
+        "--num_inference_steps",
+        type=int,
+        default=50,
+        help="Number of denoising steps.",
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
+    if args.lora_checkpoint_path is not None and args.checkpoint_path == "models/ppd/sd1.5-epoch=10-step=720000.ckpt":
+        args.checkpoint_path = None
     height = args.height
     width = args.width
 
@@ -214,7 +255,8 @@ if __name__ == "__main__":
 
     # First load the base model
     print(f"Loading base model from: {base_model_path}")
-    model_manager = ModelManager(torch_dtype=torch.bfloat16, device="cuda")
+    manager_dtype = torch.bfloat16 if args.device != "cpu" else torch.float32
+    model_manager = ModelManager(torch_dtype=manager_dtype, device=args.device)
     model_manager.load_models([base_model_path])
     assert (args.checkpoint_path is not None) ^ (args.lora_checkpoint_path is not None), "Either checkpoint or lora checkpoint must be provided, but not both"
 
@@ -230,7 +272,8 @@ if __name__ == "__main__":
             lora_alpha=args.lora_alpha,
             target_modules=args.lora_target_modules.split(","),
         )
-        pipe.unet = inject_adapter_in_model(lora_config, pipe.unet)
+        denoising_model = pipe.unet if getattr(pipe, "unet", None) is not None else pipe.denoising_model()
+        pipe.unet = inject_adapter_in_model(lora_config, denoising_model)
         # Lora pretrained lora weights
         state_dict = load_state_dict(args.lora_checkpoint_path)
         missing_keys, unexpected_keys = pipe.unet.load_state_dict(state_dict, strict=False)
@@ -242,7 +285,7 @@ if __name__ == "__main__":
     image_in_pil = Image.open(args.input_image).resize((height, width), Image.Resampling.LANCZOS).convert("RGB")
     prompt = args.prompt
     negative_prompt = "worst quality, low quality, monochrome, zombie, interlocked fingers, Aissist, cleavage, nsfw, game, rendering, cartoon, 3D"
-    inference_steps = 50
+    inference_steps = args.num_inference_steps
 
     # Generate image with the trained model
     image_in = pipe.preprocess_image(image_in_pil)
